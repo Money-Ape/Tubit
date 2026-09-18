@@ -226,7 +226,7 @@ class FormatCard(ToggleButtonBehavior, Card):
         top_row.add_widget(self.check_label)
 
         codec = Label(
-            text=(fmt.get("codec") or "Unknown").upper(), font_size=dp(11),
+            text=fmt.get("codec") or "Unknown", font_size=dp(11),
             halign="left", valign="middle", size_hint_y=None, height=dp(16),
             color=get_color_from_hex(THEME["subtext"]),
         )
@@ -660,7 +660,11 @@ class TubitRoot(BoxLayout):
         # Build the format string
         # --------------------------------------------
         if self.format_mode == "video":
-            format_id = (f"{self.selected_format['format_id']}+bestaudio/best")
+            if self.selected_format.get("has_audio") and self.selected_format.get("audio_known", True):
+                # Already contains audio - don't merge a second track
+                format_id = self.selected_format["format_id"]
+            else:
+                format_id = f"{self.selected_format['format_id']}+bestaudio/best"
 
         elif self.format_mode == "video_only":
             format_id = self.selected_format["format_id"]
