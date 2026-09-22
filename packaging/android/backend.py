@@ -264,6 +264,92 @@ def format_file_size(size):
     return f"{size:.2f} PB"
 
 # ==================================================
+# Format labelling (works for YouTube *and* Instagram)
+# ==================================================
+_GENERIC_NOTES = ("dash", "unknown", "default", "medium", "low", "high")
+
+def friendly_codec(codec):
+    # vp09.00.31.08...' -> 'VP9', 'avc1.64001f' -> 'H.264', 'mp4a.40.2' -> 'AAC
+    if not codec or codec == "none":
+        return None
+    c = codec.lower()
+    table = (
+        (("avc1", "avc3", "h264"), "H.264"),
+        (("hev1", "hvc1", "h265"), "H.265"),
+        (("vp09", "vp9"), "VP9"),
+        (("vp08", "vp8"), "VP8"),
+        (("av01", "av1"), "AV1"),
+        (("mp4a", "aac"), "AAC"),
+        (("opus",), "Opus"),
+        (("vorbis",), "Vorbis"),
+        (("ec-3", "eac3"), "E-AC3"),
+        (("mp3",), "MP3"),
+    )
+    for prefixes, name in table:
+        if c.startswith(prefixes):
+            return name
+    return c.split(".")[0].upper()
+
+def describe_format(fmt, duration=None):
+    vcodec, acodec = fmt.get("vcodec"), fmt.get("acodec")
+    height, width = fmt.get("height"), fmt.get("width")
+    fps, tbr, abr = fmt.get("fps"), fmt.get("tbr"), fmt.get("abr")
+    note = (fmt.get("format_note") or "").strip()
+
+    audio_only = vcodec == "none"
+    video_only = acodec == "none" and vcodec not in (None, "none")
+    has_video = not audio_only
+    has_audio = not video_only
+
+    # ---- quality label ----
+    if audio_only:
+        rate = abr or tbr
+        quality = f"{int(rate)} kbps" if rate else "Audio"
+    elif height:
+        # Reels are portrait (720x1280) -> use the shorter side so it reads 720p
+        side = min(height, width) if width else height
+        quality = f"{int(side)}p"
+        if fps and fps > 30:
+            quality += f"{int(fps)}"
+    elif note and not note.lower().startswith(_GENERIC_NOTES):
+        quality = note
+    elif tbr:
+        quality = f"{int(tbr)} kbps"
+    else:
+        quality = "Video"
+
+    # ---- detail line ----
+    vc, ac = friendly_codec(vcodec), friendly_codec(acodec)
+    if audio_only:
+        detail = ac or "Audio only"
+    elif video_only:
+        detail = f"{vc or 'Video'} \u2022 no audio"
+    elif vc and ac:
+        detail = f"{vc} + {ac}"
+    else:
+        detail = f"{vc} \u2022 video+audio" if vc else "Video + audio"
+    if width and height and not audio_only:
+        detail += f" \u2022 {int(width)}x{int(height)}"
+
+    # ---- size (exact -> approx -> estimated from bitrate) ----
+    size = fmt.get("filesize") or fmt.get("filesize_approx")
+    size_text = format_file_size(size) if size else None
+    if not size_text and tbr and duration:
+        size_text = "~" + format_file_size(tbr * 125 * duration)
+    if not size_text:
+        size_text = "Size unknown"
+
+    return {
+        "quality": quality,
+        "codec": detail,
+        "size": size_text,
+        "has_video": has_video,
+        "has_audio": has_audio,
+        "audio_known": acodec not in (None,),   # False -> unsure whether audio is included
+        "sort_key": (height or 0, tbr or abr or 0),
+    }
+
+# ==================================================
 # Background workers (plain threads, not QThread)
 # ==================================================
 class FetchWorker(threading.Thread):
@@ -333,26 +419,19 @@ class FetchWorker(threading.Thread):
             formats = info.get("formats", [])
             print(f"Formats found : {len(formats)}")
 
+            duration = info.get("duration")
             processed = []
 
             for fmt in formats:
-
-                processed.append({
+                d = describe_format(fmt, duration)
+                d.update({
                     "format_id": fmt.get("format_id"),
-                    "quality": fmt.get("format_note")
-                               or fmt.get("resolution")
-                               or "Unknown",
-                    "extension": fmt.get("ext"),
-                    "codec": (fmt.get("vcodec")
-                              if fmt.get("vcodec") not in (None, "none")
-                              else fmt.get("acodec")) or "Unknown",
-                    "size": format_file_size(
-                        fmt.get("filesize")
-                        or fmt.get("filesize_approx")
-                    ),
-                    "has_video": fmt.get("vcodec") != "none",
-                    "has_audio": fmt.get("acodec") != "none",
+                    "extension": fmt.get("ext") or "?",
                 })
+                processed.append(d)
+
+            # Best quality first
+            processed.sort(key=lambda f: f["sort_key"], reverse=True)
 
             print("STEP 5 : Scheduling UI update")
             Clock.schedule_once(
