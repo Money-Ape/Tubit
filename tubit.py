@@ -1,5 +1,4 @@
-import yt_dlp, subprocess as cmd, platform, os, re, shutil, sys
-from PySide6.QtCore import (QObject, QThread, Signal)
+import importlib.util, subprocess as cmd, platform, os, re, shutil, sys
 
 def resource_path(relative_path):
     try:
@@ -45,16 +44,14 @@ def OS_platform_verify():
         print(f"Platform Detected.! = {os_var}\n")
         module_names = ["yt_dlp", "PySide6"]
         for module_name in module_names:
-            try:
-                __import__(module_name)
+            if importlib.util.find_spec(module_name) is not None:
                 print(f"{module_name}.......ok")
                 print(f"{module_name} is already installed.\n")
-
-            except:
+            else:
                 print(f"{module_name}.......Error")
                 print(f"{module_name} is not installed.\nInstalling...")
                 try:
-                    cmd.run(["cmd", "/c", "pip3", "install", module_name, "--quiet"])
+                    cmd.run([sys.executable, "-m", "pip", "install", module_name, "--quiet"], check=True)
                     print(f"{module_name} installed successfully.\n")
                 except cmd.CalledProcessError:
                     print(f"Failed to install {module_name}.\n")
@@ -65,15 +62,14 @@ def OS_platform_verify():
         print(f"Platform Detected.! = {os_var}\n")
         module_names = ["yt_dlp", "PySide6"]
         for module_name in module_names:
-            try:
-                __import__(module_name)
+            if importlib.util.find_spec(module_name) is not None:
                 print(f"{module_name}.......ok")
                 print(f"{module_name} is already installed.\n")
-            except:
+            else:
                 print(f"{module_name}.......Error")
                 print(f"{module_name} is not installed.\nInstalling...")
                 try:
-                    cmd.run(["pip", "install", module_name, "--quiet"])
+                    cmd.run([sys.executable, "-m", "pip", "install", module_name, "--quiet"], check=True)
                     print(f"{module_name} installed successfully.\n")
                 except cmd.CalledProcessError:
                     print(f"Failed to install {module_name}.\n")
@@ -89,7 +85,7 @@ def setup_ffmpeg():
         return
     
     source = os.path.join(os.getcwd(), "ffmpeg")
-    dest = "C:\ffmpeg"
+    dest = r"C:\ffmpeg"
     if not os.path.isdir(source):
         print("Bundled FFmpeg folder not found.")
         return
@@ -105,7 +101,10 @@ def setup_ffmpeg():
             winreg.HKEY_CURRENT_USER, "Environment", 0,
             winreg.KEY_ALL_ACCESS
         )
-        value, _ = winreg.QueryValueEx(key, "Path")
+        try:
+            value, _ = winreg.QueryValueEx(key, "Path")
+        except FileNotFoundError:
+            value = ""
         if ffmpeg_bin.lower() not in value.lower():
             value += ";" + ffmpeg_bin
             winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, value)
@@ -116,6 +115,9 @@ def setup_ffmpeg():
 
 
 OS_platform_verify()
+
+import yt_dlp
+from PySide6.QtCore import (QObject, QThread, Signal)
 
 def format_file_size(size):
     if size is None:
@@ -146,6 +148,9 @@ class FetchWorker(QThread):
             }
             with yt_dlp.YoutubeDL(opts) as tubit_ydl:
                 info = tubit_ydl.extract_info(self.url, download=False)
+
+            if not info:
+                raise ValueError("Could not extract video information.")
 
             formats = []
             seen = set()
