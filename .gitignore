@@ -9,6 +9,9 @@ bin/
 venv
 *.log
 
+# Local dir config
+.directory
+
 # JPG
 *.jpeg
 *.jpe
